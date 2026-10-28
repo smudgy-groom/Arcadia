@@ -31,7 +31,8 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     arc: Data<Arcadia<R>>,
     req: HttpRequest,
 ) -> Result<HttpResponse> {
-    let query = body.into_inner();
+    let mut query = body.into_inner();
+    query.page_size = query.page_size.min(arc.api.max_page_size);
 
     arc.pool
         .require_permission(current_user.sub, &UserPermission::SearchUsers, req.path())
