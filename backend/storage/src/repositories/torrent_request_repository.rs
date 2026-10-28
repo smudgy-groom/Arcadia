@@ -207,6 +207,23 @@ impl ConnectionPool {
 
         let mut tx = self.pool.begin().await?;
 
+        // Claim the request atomically: only the transaction that flips `filled_at` from
+        // NULL may pay the bounty, so concurrent fills cannot each be credited.
+        let claim = sqlx::query!(
+            r#"
+            UPDATE torrent_requests tr
+            SET filled_at = NOW()
+            WHERE tr.id = $1 AND tr.filled_at IS NULL
+            "#,
+            torrent_request_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        if claim.rows_affected() == 0 {
+            return Err(Error::TorrentRequestAlreadyFilled);
+        }
+
         sqlx::query!(
             r#"
             UPDATE users
@@ -281,8 +298,7 @@ impl ConnectionPool {
             UPDATE torrent_requests tr
             SET
                 filled_by_torrent_id = $1,
-                filled_by_user_id = $2,
-                filled_at = NOW()
+                filled_by_user_id = $2
             WHERE
                 tr.id = $3
                 "#,
