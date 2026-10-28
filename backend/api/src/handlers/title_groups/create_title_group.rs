@@ -38,6 +38,13 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     validate_image_urls(&form.covers, &approved_image_hosts)?;
     validate_image_urls(&form.screenshots, &approved_image_hosts)?;
 
+    // trailers are rendered into an iframe/video `src`, so only real http(s) URLs may be stored
+    form.trailers.retain(|trailer| {
+        url::Url::parse(trailer)
+            .map(|url| matches!(url.scheme(), "http" | "https"))
+            .unwrap_or(false)
+    });
+
     let rating_futures: Vec<_> = form
         .external_links
         .iter()
