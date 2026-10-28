@@ -1,9 +1,11 @@
+use actix_web::HttpRequest;
 use arcadia_periodic_tasks::config::PeriodicTasksConfig;
 use arcadia_shared::config::{default_log_level, DatabaseConfig, TelemetryConfig};
 use reqwest::Url;
 use serde::Deserialize;
 
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 
 use arcadia_storage::models::title_group::ContentType;
 
@@ -90,6 +92,31 @@ pub struct ApiConfig {
     pub max_page_size: u32,
     #[serde(default)]
     pub ip_check_providers: IpCheckProvidersConfig,
+    /// Header set by the reverse proxy holding the original ip address of the client. Its last
+    /// address is selected, the one added by the proxy closest to this server. Leave unset to use
+    /// the connecting ip address, the only value a client cannot forge.
+    #[serde(default)]
+    pub reverse_proxy_client_ip_header_name: Option<String>,
+}
+
+impl ApiConfig {
+    /// Address of the client that made the request.
+    ///
+    /// `Forwarded` and `X-Forwarded-For` are attacker-controlled unless a reverse proxy
+    /// overwrites them, so a header is only read when the administrator declares which one their
+    /// proxy sets, and only its last value is trusted. The socket peer address is used when no
+    /// header is configured and as a fallback when the configured one is absent or malformed.
+    pub fn client_ip(&self, req: &HttpRequest) -> Option<IpAddr> {
+        let forwarded = self
+            .reverse_proxy_client_ip_header_name
+            .as_ref()
+            .and_then(|header_name| req.headers().get(header_name.as_str()))
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next_back())
+            .and_then(|value| value.trim().parse().ok());
+
+        forwarded.or_else(|| req.peer_addr().map(|peer| peer.ip()))
+    }
 }
 
 fn default_redis_port() -> u16 {
