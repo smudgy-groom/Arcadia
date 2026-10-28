@@ -33,11 +33,24 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         .find_forum_thread(edited_forum_thread.id, user.sub)
         .await?;
 
-    if !arc
+    let is_staff = arc
         .pool
         .user_has_permission(user.sub, &UserPermission::EditForumThread)
-        .await?
-        && original_thread.created_by_id != user.sub
+        .await?;
+
+    if !is_staff && original_thread.created_by_id != user.sub {
+        return Err(Error::InsufficientPermissions(format!(
+            "{:?}",
+            UserPermission::EditForumThread
+        )));
+    }
+
+    // Relocating a thread and editing a locked thread are moderation actions. Moving a thread
+    // must also not become a way around the destination sub-category's `new_threads_restricted`
+    // allow-list, which is enforced on creation but would otherwise be skipped here.
+    if !is_staff
+        && (edited_forum_thread.forum_sub_category_id != original_thread.forum_sub_category_id
+            || original_thread.locked)
     {
         return Err(Error::InsufficientPermissions(format!(
             "{:?}",
