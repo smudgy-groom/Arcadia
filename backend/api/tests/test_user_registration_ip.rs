@@ -68,12 +68,15 @@ async fn test_set_user_registration_ip_check(pool: PgPool) {
         .set_json(&check)
         .to_request();
     let resp = test::call_service(&service, req).await;
-    assert_eq!(resp.status(), StatusCode::OK);
+    // the verdict is recomputed server-side, so the forged values in the body are never stored:
+    // the fixture user registered from 10.10.4.88, a private address no provider can be asked
+    // about, and the request fails with 400 instead of saving what the caller sent
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
     let registration_ip = pool.find_user_registration_ip(BASIC_USER_ID).await.unwrap();
-    assert_eq!(registration_ip.provider, Some(IpCheckProvider::Vpnapi));
-    assert_eq!(registration_ip.city.as_deref(), Some("Berlin"));
-    assert_eq!(registration_ip.is_tor, Some(true));
+    assert_eq!(registration_ip.provider, None);
+    assert_eq!(registration_ip.city, None);
+    assert_eq!(registration_ip.is_tor, None);
 }
 
 #[sqlx::test(fixtures("with_test_users"), migrations = "../storage/migrations")]
