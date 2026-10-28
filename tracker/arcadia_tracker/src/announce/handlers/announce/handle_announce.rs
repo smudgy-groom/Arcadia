@@ -35,6 +35,11 @@ use log::debug;
 use opentelemetry::KeyValue;
 use rand::{rng, seq::IteratorRandom, RngExt};
 
+/// Upper bound of the transfer rate a single peer can plausibly sustain. Used to
+/// reject forged `uploaded`/`downloaded` counters (10 Gbit/s, generous for any
+/// consumer connection).
+const MAX_TRANSFER_BYTES_PER_SECOND: u64 = 1_250_000_000;
+
 #[derive(Debug)]
 pub struct UserAgent(pub String);
 
@@ -416,6 +421,27 @@ async fn handle(
 
                     // Calculate change in upload and download compared to previous
                     // announce
+                    //
+                    // The client reports its own cumulative counters, so cap the growth by
+                    // what the connection could physically have transferred since the
+                    // previous announce. The capped value is written back to the peer so a
+                    // single forged announce cannot inflate later deltas either.
+                    let elapsed_secs = (now - old_peer.updated_at).num_seconds().max(1) as u64;
+                    let max_delta = elapsed_secs.saturating_mul(MAX_TRANSFER_BYTES_PER_SECOND);
+                    let capped_uploaded = ann
+                        .uploaded
+                        .min(old_peer.uploaded.saturating_add(max_delta));
+                    let capped_downloaded = ann
+                        .downloaded
+                        .min(old_peer.downloaded.saturating_add(max_delta));
+                    if let Some(peer) = torrent.peers.get_mut(&peer::Index {
+                        user_id,
+                        peer_id: ann.peer_id,
+                    }) {
+                        peer.uploaded = capped_uploaded;
+                        peer.downloaded = capped_downloaded;
+                    }
+
                     if ann.uploaded < old_peer.uploaded || ann.downloaded < old_peer.downloaded {
                         // Client sent the same peer id but restarted the session
                         // Assume delta is 0
@@ -423,8 +449,8 @@ async fn handle(
                         downloaded_delta = 0;
                     } else {
                         // Assume client continues previously tracked session
-                        uploaded_delta = ann.uploaded - old_peer.uploaded;
-                        downloaded_delta = ann.downloaded - old_peer.downloaded;
+                        uploaded_delta = capped_uploaded - old_peer.uploaded;
+                        downloaded_delta = capped_downloaded - old_peer.downloaded;
                     }
 
                     // Warn user if peer last announced less than
