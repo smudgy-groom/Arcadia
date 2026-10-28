@@ -256,6 +256,10 @@ pub struct EditedUser {
     pub avatar: Option<String>,
     pub email: String,
     pub description: String,
+    /// Required when the email address changes: it is the address a password reset link is
+    /// sent to, so it must not be modifiable with a stolen session alone.
+    #[serde(default)]
+    pub current_password: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
