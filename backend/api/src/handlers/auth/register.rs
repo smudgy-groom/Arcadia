@@ -42,7 +42,7 @@ pub struct RegisterQuery {
     )
 )]
 pub async fn exec<R: RedisPoolInterface + 'static>(
-    new_user: web::Json<Register>,
+    mut new_user: web::Json<Register>,
     arc: web::Data<Arcadia<R>>,
     req: HttpRequest,
     query: web::Query<RegisterQuery>,
@@ -67,6 +67,13 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     }
 
     validate_email(&new_user.email)?;
+
+    // Usernames are the only identity a member is shown, and the unique index on
+    // `users.username` is case sensitive, so `Alice` would otherwise be accepted
+    // next to an existing `alice` and be indistinguishable from it in the UI.
+    // Fold the name before validating and storing it so the uniqueness check
+    // applies to the name members actually read.
+    new_user.username = new_user.username.to_lowercase();
     validate_username(&new_user.username)?;
     validate_password(&new_user.password)?;
     validate_password_verification(&new_user.password, &new_user.password_verify)?;
