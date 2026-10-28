@@ -129,6 +129,13 @@ impl ConnectionPool {
                 JOIN torrent_requests r ON eg.title_group_id = r.title_group_id
                 WHERE t.id = $1
                   AND r.id = $2
+                  AND (cardinality(r.source) = 0 OR eg.source = ANY(r.source))
+                  AND (cardinality(r.container) = 0 OR t.container = ANY(r.container))
+                  AND (cardinality(r.video_resolution) = 0
+                       OR t.video_resolution && r.video_resolution)
+                  AND (cardinality(r.audio_codec) = 0
+                       OR t.audio_codec && r.audio_codec)
+                  AND (r.edition_name IS NULL OR eg.name = r.edition_name)
             )
             "#,
             torrent_id,
