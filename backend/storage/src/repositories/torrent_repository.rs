@@ -188,8 +188,8 @@ impl ConnectionPool {
                     .features
                     .split(',')
                     .filter(|f| !f.is_empty())
-                    .map(|f| Features::from_str(f).ok().unwrap())
-                    .collect::<Vec<Features>>(),
+                    .map(|f| Features::from_str(f.trim()).map_err(|_| Error::TorrentFileInvalid))
+                    .collect::<Result<Vec<Features>>>()?,
             )
             .bind(
                 torrent_form
