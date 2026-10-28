@@ -27,6 +27,9 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     arc: Data<Arcadia<R>>,
     user: Authdata,
 ) -> Result<HttpResponse> {
+    if gift.bonus_points < 0 || gift.freeleech_tokens < 0 {
+        return Err(Error::InvalidGiftAmount);
+    }
     let current_user = arc.pool.find_user_with_id(user.sub).await?;
     if current_user.bonus_points < gift.bonus_points {
         return Err(Error::NotEnoughBonusPointsAvailable);
