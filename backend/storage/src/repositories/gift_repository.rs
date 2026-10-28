@@ -93,11 +93,13 @@ impl ConnectionPool {
         bonus_points: i64,
         freeleech_tokens: i32,
     ) -> Result<()> {
-        sqlx::query!(
+        let result = sqlx::query!(
             r#"
               UPDATE users SET bonus_points = bonus_points - $1,
               freeleech_tokens = freeleech_tokens - $2
               WHERE id = $3
+                AND bonus_points >= $1
+                AND freeleech_tokens >= $2
             "#,
             bonus_points,
             freeleech_tokens,
@@ -105,6 +107,10 @@ impl ConnectionPool {
         )
         .execute(&mut **tx)
         .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(Error::NotEnoughBonusPointsAvailable);
+        }
 
         Ok(())
     }

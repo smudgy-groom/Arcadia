@@ -9,7 +9,10 @@ use actix_web::{
     Error, FromRequest, HttpMessage as _, HttpRequest,
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
-use arcadia_storage::{models::user::Claims, redis::RedisPoolInterface};
+use arcadia_storage::{
+    models::user::{Claims, TokenType},
+    redis::RedisPoolInterface,
+};
 use futures_util::future::{err, ok, Ready};
 use jsonwebtoken::{decode, errors::ErrorKind, DecodingKey, Validation};
 
@@ -80,6 +83,12 @@ pub async fn validate_token<R: RedisPoolInterface + 'static>(
             _ => ErrorUnauthorized("authentication error"),
         })?;
 
+    // only an access token authenticates a request; a refresh token is a long lived
+    // credential that has to be exchanged first
+    if token_data.claims.typ != TokenType::Access {
+        return Err(ErrorUnauthorized("authentication error"));
+    }
+
     let user_id = token_data.claims.sub;
 
     let is_invalidated = arc
@@ -90,6 +99,17 @@ pub async fn validate_token<R: RedisPoolInterface + 'static>(
 
     if is_invalidated {
         return Err(ErrorUnauthorized("token invalidated"));
+    }
+
+    // the ban has to be enforced on every request: a token issued before the ban is still
+    // cryptographically valid, and not every path that bans a user invalidates their sessions
+    let is_banned = arc
+        .pool
+        .is_user_banned(user_id)
+        .await
+        .map_err(|e| ErrorUnauthorized(e.to_string()))?;
+    if is_banned {
+        return Err(ErrorUnauthorized("account banned"));
     }
 
     Ok(user_id)

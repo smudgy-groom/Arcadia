@@ -3,11 +3,14 @@ use crate::{
 };
 use actix_web::{
     web::{Data, Json},
-    HttpResponse,
+    HttpRequest, HttpResponse,
 };
 use arcadia_common::error::Result;
 use arcadia_storage::{
-    models::artist::{Artist, UserCreatedArtist},
+    models::{
+        artist::{Artist, UserCreatedArtist},
+        user::UserPermission,
+    },
     redis::RedisPoolInterface,
 };
 
@@ -28,7 +31,12 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     artists: Json<Vec<UserCreatedArtist>>,
     arc: Data<Arcadia<R>>,
     user: Authdata,
+    req: HttpRequest,
 ) -> Result<HttpResponse> {
+    arc.pool
+        .require_permission(user.sub, &UserPermission::UploadTorrent, req.path())
+        .await?;
+
     let approved_image_hosts = arc.settings.lock().unwrap().approved_image_hosts.clone();
     for artist in artists.iter() {
         validate_image_urls(&artist.pictures, &approved_image_hosts)?;

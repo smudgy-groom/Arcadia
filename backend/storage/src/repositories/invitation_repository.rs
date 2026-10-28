@@ -25,7 +25,7 @@ impl ConnectionPool {
 
         let mut tx = self.pool.begin().await?;
 
-        let _ = Self::decrement_invitations_available(&mut tx, current_user_id).await;
+        Self::decrement_invitations_available(&mut tx, current_user_id).await?;
 
         // TODO: make sure no invitation/user exists for this email address
         let created_invitation = sqlx::query_as!(
@@ -90,15 +90,21 @@ impl ConnectionPool {
         tx: &mut Transaction<'_, Postgres>,
         current_user_id: i32,
     ) -> Result<()> {
-        sqlx::query!(
+        // the check and the decrement happen in a single statement so that concurrent
+        // creations can not spend the same invitation several times
+        let decremented = sqlx::query!(
             r#"
               UPDATE users SET invitations = invitations - 1
-              WHERE id = $1
+              WHERE id = $1 AND invitations > 0
             "#,
             current_user_id
         )
         .execute(&mut **tx)
         .await?;
+
+        if decremented.rows_affected() != 1 {
+            return Err(Error::NoInvitationsAvailable);
+        }
 
         Ok(())
     }

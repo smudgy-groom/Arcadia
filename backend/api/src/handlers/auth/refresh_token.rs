@@ -2,7 +2,7 @@ use crate::{services::auth::generate_login_tokens, Arcadia};
 use actix_web::{web, HttpResponse};
 use arcadia_common::error::{Error, Result};
 use arcadia_storage::{
-    models::user::{Claims, LoginResponse, RefreshToken},
+    models::user::{Claims, LoginResponse, RefreshToken, TokenType},
     redis::RedisPoolInterface,
 };
 use chrono::prelude::Utc;
@@ -28,6 +28,11 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     )
     .map_err(|_| Error::InvalidOrExpiredRefreshToken)?;
 
+    // an access token must not be exchangeable for a 90 day credential
+    if old_refresh_token.claims.typ != TokenType::Refresh {
+        return Err(Error::InvalidOrExpiredRefreshToken);
+    }
+
     let is_invalidated = arc
         .auth
         .is_invalidated(old_refresh_token.claims.sub, old_refresh_token.claims.iat)
@@ -44,12 +49,25 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         return Err(Error::AccountBanned);
     }
 
+    // the presented token is single use: it is redeemed before a new pair is issued, so a
+    // token that has already been exchanged can never be replayed
+    if !arc
+        .auth
+        .consume_refresh_token(&form.refresh_token)
+        .await?
+    {
+        return Err(Error::InvalidOrExpiredRefreshToken);
+    }
+
     let tokens = generate_login_tokens(
         old_refresh_token.claims.sub,
         &arc.api.jwt_secret,
         true,
         Utc::now(),
     )?;
+    arc.auth
+        .register_refresh_token(&tokens.refresh_token)
+        .await?;
 
     Ok(HttpResponse::Ok().json(tokens))
 }

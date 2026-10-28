@@ -1,7 +1,7 @@
 use bip_bencode::BRefAccess;
 use bip_bencode::{BDictAccess, BConvert, BencodeConvertError, BListAccess};
 
-use error::{ParseError, ParseResult};
+use error::{ParseError, ParseErrorKind, ParseResult};
 
 /// Struct implemented the BencodeConvert trait for decoding the metainfo file.
 struct MetainfoConverter;
@@ -106,10 +106,24 @@ pub fn parse_info_bencode<'a, B>(root_dict: &'a BDictAccess<B::BKey, B>) -> Pars
 
 // ----------------------------------------------------------------------------//
 
+/// Upper bound on the piece length accepted from a metainfo file.
+///
+/// The piece length is read straight out of the torrent and is later used to
+/// size the hashing buffers, so it has to be bounded here, before it reaches
+/// the builder.
+const MAX_PIECE_LENGTH: i64 = 16 * 1024 * 1024;
+
 /// Parses the piece length from the info dictionary.
 pub fn parse_piece_length<B>(info_dict: &BDictAccess<B::BKey, B>) -> ParseResult<u64>
     where B: BRefAccess {
-    CONVERT.lookup_and_convert_int(info_dict, PIECE_LENGTH_KEY).map(|len| len as u64)
+    let piece_length = try!(CONVERT.lookup_and_convert_int(info_dict, PIECE_LENGTH_KEY));
+
+    if piece_length <= 0 || piece_length > MAX_PIECE_LENGTH {
+        let details = format!("Piece Length Of {} Is Invalid", piece_length);
+        return Err(ParseError::from_kind(ParseErrorKind::MissingData { details }));
+    }
+
+    Ok(piece_length as u64)
 }
 
 /// Parses the pieces from the info dictionary.
@@ -147,7 +161,16 @@ pub fn parse_file_dict<B>(file_bencode: &B) -> ParseResult<&BDictAccess<B::BKey,
 /// Parses the length from the info or file dictionary.
 pub fn parse_length<B>(info_or_file_dict: &BDictAccess<B::BKey, B>) -> ParseResult<u64>
     where B: BRefAccess {
-    CONVERT.lookup_and_convert_int(info_or_file_dict, LENGTH_KEY).map(|len| len as u64)
+    let length = try!(CONVERT.lookup_and_convert_int(info_or_file_dict, LENGTH_KEY));
+
+    // A file length is unsigned; widening a negative bencode integer would turn
+    // it into a value near u64::MAX and poison every sum built from it.
+    if length < 0 {
+        let details = format!("File Length Of {} Is Invalid", length);
+        return Err(ParseError::from_kind(ParseErrorKind::MissingData { details }));
+    }
+
+    Ok(length as u64)
 }
 
 /// Parses the md5sum from the info or file dictionary.

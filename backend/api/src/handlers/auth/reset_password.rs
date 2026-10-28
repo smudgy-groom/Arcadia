@@ -46,8 +46,10 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         .await?;
 
     arc.pool.revoke_password_reset_token(user_id).await?;
-    // whoever was logged in with the old password is logged out
+    // whoever was logged in with the old password is logged out, and so are the API keys
+    // created before the account was recovered
     arc.auth.invalidate(user_id).await?;
+    arc.pool.delete_all_api_keys(user_id).await?;
 
     Ok(HttpResponse::Ok().finish())
 }

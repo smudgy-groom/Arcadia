@@ -19,7 +19,7 @@ use crate::{
         },
         torrent_report::TorrentReport,
         torrent_request::{TorrentRequest, TorrentRequestBounty, TorrentRequestHierarchyLite},
-        user::{UserLite, UserLiteAvatar},
+        user::{UserLite, UserLiteAvatar, UserPermission},
     },
 };
 use arcadia_common::error::{Error, Result};
@@ -130,6 +130,11 @@ impl ConnectionPool {
     ) -> Result<TitleGroupAndAssociatedData> {
         let title_group = self.find_title_group(title_group_id).await?;
 
+        // Torrent reports are moderation data: only users who may act on them can see them.
+        let can_view_torrent_reports = self
+            .user_has_permission(user_id, &UserPermission::DeleteTorrentReport)
+            .await?;
+
         let (
             edition_group_rows,
             torrent_rows,
@@ -205,7 +210,7 @@ impl ConnectionPool {
                 user_id
             )
             .fetch_all(&self.pool),
-            // Torrent reports
+            // Torrent reports (moderation data, only returned to users who may act on them)
             sqlx::query_as!(
                 TorrentReport,
                 r#"
@@ -213,13 +218,15 @@ impl ConnectionPool {
                     json_build_object('id', u.id, 'username', u.username, 'warned', u.warned, 'banned', u.banned) AS "reported_by!: Json<UserLite>"
                 FROM torrent_reports tr
                 JOIN users u ON u.id = tr.reported_by_id
-                WHERE tr.reported_torrent_id IN (
+                WHERE $2
+                AND tr.reported_torrent_id IN (
                     SELECT t.id FROM torrents t
                     JOIN edition_groups eg ON eg.id = t.edition_group_id
                     WHERE eg.title_group_id = $1 AND t.deleted_at IS NULL
                 )
                 "#,
-                title_group_id
+                title_group_id,
+                can_view_torrent_reports
             )
             .fetch_all(&self.pool),
             // Affiliated artists with artist data

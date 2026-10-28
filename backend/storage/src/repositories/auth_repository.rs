@@ -166,10 +166,13 @@ impl ConnectionPool {
             Error::WrongUsernameOrPassword
         })?;
 
-        let parsed_hash = PasswordHash::new(&user.password_hash);
+        // a stored hash that is not a valid PHC string (the first account seeded by the initial
+        // migration has the literal password hash "none") must be a login failure, not a panic
+        let parsed_hash = PasswordHash::new(&user.password_hash)
+            .map_err(|_| Error::WrongUsernameOrPassword)?;
 
         Argon2::default()
-            .verify_password(login.password.as_bytes(), &parsed_hash.unwrap())
+            .verify_password(login.password.as_bytes(), &parsed_hash)
             .map_err(|_| Error::WrongUsernameOrPassword)?;
 
         Ok(user)
@@ -244,6 +247,16 @@ impl ConnectionPool {
         if deleted_api_keys == 0 {
             return Err(Error::APIKeyNotFound);
         }
+
+        Ok(())
+    }
+
+    /// Deletes every API key of the user. Called when the password is changed or reset, so that
+    /// a key created before the account was recovered stops working.
+    pub async fn delete_all_api_keys(&self, user_id: i32) -> Result<()> {
+        sqlx::query!("DELETE FROM api_keys WHERE user_id = $1", user_id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

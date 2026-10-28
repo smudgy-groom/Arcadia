@@ -15,6 +15,10 @@ impl ConnectionPool {
         user_id: i32,
         vote_currencies: &[TorrentRequestVoteCurrency],
     ) -> Result<TorrentRequestVote> {
+        if torrent_request_vote.bounty_upload < 0 || torrent_request_vote.bounty_bonus_points < 0 {
+            return Err(Error::VoteBountyRequired);
+        }
+
         let has_upload = vote_currencies.contains(&TorrentRequestVoteCurrency::Upload)
             && torrent_request_vote.bounty_upload > 0;
         let has_bonus_points = vote_currencies.contains(&TorrentRequestVoteCurrency::BonusPoints)
@@ -36,31 +40,33 @@ impl ConnectionPool {
 
         let mut tx = self.pool.begin().await?;
 
-        let created_torrent_request_vote = sqlx::query_as!(
+        // The debit carries its own sufficiency predicate and has to match a row for the
+        // vote to exist: under READ COMMITTED a concurrent debit re-evaluates the
+        // predicate against the row it locks, so a balance can only be spent once.
+        let inserted_vote = sqlx::query_as!(
             TorrentRequestVote,
             r#"
-                WITH inserted_vote AS (
-                    INSERT INTO torrent_request_votes (torrent_request_id, created_by_id,
-                                                      bounty_upload, bounty_bonus_points)
-                    VALUES ($1, $2, $3, $4)
-                    RETURNING id, torrent_request_id, created_at, created_by_id, bounty_upload, bounty_bonus_points
-                ),
-                is_first_vote AS (
-                    SELECT NOT EXISTS (
-                        SELECT 1
-                        FROM torrent_request_votes
-                        WHERE torrent_request_id = $1
-                          AND created_by_id = $2
-                          AND id != (SELECT id FROM inserted_vote)
-                    ) AS first_vote
-                ),
-                updated_user AS (
+                WITH debited_user AS (
                     UPDATE users u
                     SET
                         uploaded = u.uploaded - $3,
                         bonus_points = u.bonus_points - $4,
-                        requests_voted = u.requests_voted + CASE WHEN (SELECT first_vote FROM is_first_vote) THEN 1 ELSE 0 END
-                    WHERE u.id = (SELECT created_by_id FROM inserted_vote)
+                        requests_voted = u.requests_voted + CASE WHEN NOT EXISTS (
+                            SELECT 1
+                            FROM torrent_request_votes
+                            WHERE torrent_request_id = $1
+                              AND created_by_id = $2
+                        ) THEN 1 ELSE 0 END
+                    WHERE u.id = $2
+                      AND u.bonus_points >= $4
+                      AND u.uploaded >= $3
+                    RETURNING u.id
+                ),
+                inserted_vote AS (
+                    INSERT INTO torrent_request_votes (torrent_request_id, created_by_id,
+                                                      bounty_upload, bounty_bonus_points)
+                    SELECT $1, debited_user.id, $3, $4 FROM debited_user
+                    RETURNING id, torrent_request_id, created_at, created_by_id, bounty_upload, bounty_bonus_points
                 )
                 SELECT
                     inserted_vote.id, inserted_vote.torrent_request_id, inserted_vote.created_at, inserted_vote.created_by_id, inserted_vote.bounty_upload, inserted_vote.bounty_bonus_points
@@ -71,9 +77,10 @@ impl ConnectionPool {
             torrent_request_vote.bounty_upload,
             torrent_request_vote.bounty_bonus_points
         )
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
-        .map_err(Error::CouldNotCreateTorrentRequestVote)?;
+        .map_err(Error::CouldNotCreateTorrentRequestVote)?
+        .ok_or(Error::InsufficientBonusPointsForBounty)?;
 
         if has_bonus_points {
             let title_group_name = Self::fetch_title_group_name_for_torrent_request(

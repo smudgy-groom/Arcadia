@@ -129,6 +129,13 @@ impl ConnectionPool {
                 JOIN torrent_requests r ON eg.title_group_id = r.title_group_id
                 WHERE t.id = $1
                   AND r.id = $2
+                  AND (cardinality(r.source) = 0 OR eg.source = ANY(r.source))
+                  AND (cardinality(r.container) = 0 OR t.container = ANY(r.container))
+                  AND (cardinality(r.video_resolution) = 0
+                       OR t.video_resolution && r.video_resolution)
+                  AND (cardinality(r.audio_codec) = 0
+                       OR t.audio_codec && r.audio_codec)
+                  AND (r.edition_name IS NULL OR eg.name = r.edition_name)
             )
             "#,
             torrent_id,
@@ -199,6 +206,23 @@ impl ConnectionPool {
         let torrent_uploader_id = torrent_upload_info.created_by_id;
 
         let mut tx = self.pool.begin().await?;
+
+        // Claim the request atomically: only the transaction that flips `filled_at` from
+        // NULL may pay the bounty, so concurrent fills cannot each be credited.
+        let claim = sqlx::query!(
+            r#"
+            UPDATE torrent_requests tr
+            SET filled_at = NOW()
+            WHERE tr.id = $1 AND tr.filled_at IS NULL
+            "#,
+            torrent_request_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        if claim.rows_affected() == 0 {
+            return Err(Error::TorrentRequestAlreadyFilled);
+        }
 
         sqlx::query!(
             r#"
@@ -274,8 +298,7 @@ impl ConnectionPool {
             UPDATE torrent_requests tr
             SET
                 filled_by_torrent_id = $1,
-                filled_by_user_id = $2,
-                filled_at = NOW()
+                filled_by_user_id = $2
             WHERE
                 tr.id = $3
                 "#,

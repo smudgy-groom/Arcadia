@@ -7,7 +7,10 @@ use actix_web::{
 };
 use arcadia_common::error::{Error, Result};
 use arcadia_storage::{
-    models::invitation::{Invitation, SentInvitation},
+    models::{
+        invitation::{Invitation, SentInvitation},
+        user::UserPermission,
+    },
     redis::RedisPoolInterface,
 };
 
@@ -36,12 +39,16 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
 
     // accepting an application is a staff decision, so holding an invitation
     // must not be enough to reach it through this endpoint
+    // accepting an application is a staff action: it must not be reachable through the
+    // invitation endpoint, which any member holding an invitation can call
     if invitation.user_application_id.is_some() {
         arc.pool
             .require_permission(
                 user.sub,
                 &arcadia_storage::models::user::UserPermission::UpdateUserApplication,
                 req.path(),
+                &UserPermission::UpdateUserApplication,
+                "/api/invitations",
             )
             .await?;
     }
