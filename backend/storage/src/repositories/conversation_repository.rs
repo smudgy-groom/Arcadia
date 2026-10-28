@@ -108,8 +108,8 @@ impl ConnectionPool {
             r#"
                 INSERT INTO conversation_messages (conversation_id, created_by_id, content)
                 SELECT $1, $2, $3
-                FROM conversations
-                WHERE id = $1 AND NOT locked
+                FROM conversations c
+                WHERE c.id = $1 AND NOT c.locked AND ($2 = c.sender_id OR $2 = c.receiver_id)
                 RETURNING id, conversation_id, created_at, created_by_id, content
             "#,
             message.conversation_id,
