@@ -9,7 +9,10 @@ use actix_web::{
     Error, FromRequest, HttpMessage as _, HttpRequest,
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
-use arcadia_storage::{models::user::Claims, redis::RedisPoolInterface};
+use arcadia_storage::{
+    models::user::{Claims, TokenType},
+    redis::RedisPoolInterface,
+};
 use futures_util::future::{err, ok, Ready};
 use jsonwebtoken::{decode, errors::ErrorKind, DecodingKey, Validation};
 
@@ -79,6 +82,12 @@ pub async fn validate_token<R: RedisPoolInterface + 'static>(
             ErrorKind::ExpiredSignature => ErrorUnauthorized("jwt token expired"),
             _ => ErrorUnauthorized("authentication error"),
         })?;
+
+    // only an access token authenticates a request; a refresh token is a long lived
+    // credential that has to be exchanged first
+    if token_data.claims.typ != TokenType::Access {
+        return Err(ErrorUnauthorized("authentication error"));
+    }
 
     let user_id = token_data.claims.sub;
 
