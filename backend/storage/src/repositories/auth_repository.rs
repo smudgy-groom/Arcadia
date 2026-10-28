@@ -248,6 +248,16 @@ impl ConnectionPool {
         Ok(())
     }
 
+    /// Deletes every API key of the user. Called when the password is changed or reset, so that
+    /// a key created before the account was recovered stops working.
+    pub async fn delete_all_api_keys(&self, user_id: i32) -> Result<()> {
+        sqlx::query!("DELETE FROM api_keys WHERE user_id = $1", user_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn find_user_with_id(&self, id: i32) -> Result<User> {
         sqlx::query_as!(
             User,
