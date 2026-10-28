@@ -151,8 +151,9 @@ impl ConnectionPool {
         let size = metainfo
             .info()
             .files()
-            .map(|file| file.length())
-            .sum::<u64>() as i64;
+            .try_fold(0u64, |acc, file| acc.checked_add(file.length()))
+            .filter(|total| *total <= i64::MAX as u64)
+            .ok_or(Error::TorrentFileInvalid)? as i64;
 
         let uploaded_torrent = sqlx::query_as::<_, Torrent>(create_torrent_query)
             .bind(torrent_form.edition_group_id.0)
