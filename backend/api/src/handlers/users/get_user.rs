@@ -121,7 +121,18 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         vec![]
     };
 
-    let earned_badges = arc.pool.find_user_earned_badges(query.id).await?;
+    let can_see_secret_badges = arc
+        .pool
+        .user_has_permission(
+            requesting_user.sub,
+            &UserPermission::ViewInvisibleUserBadges,
+        )
+        .await?;
+
+    let earned_badges = arc
+        .pool
+        .find_user_earned_badges(query.id, can_see_secret_badges)
+        .await?;
 
     Ok(HttpResponse::Ok().json(PublicProfile {
         user,
