@@ -356,6 +356,9 @@ pub enum Error {
     #[error("not enough freeleech tokens available")]
     NotEnoughFreeleechTokensAvailable,
 
+    #[error("gift amounts must not be negative")]
+    InvalidGiftAmount,
+
     #[error("could not create gift")]
     CouldNotCreateGift(#[source] sqlx::Error),
 
@@ -873,6 +876,7 @@ impl actix_web::ResponseError for Error {
             | Error::InvalidPassword(_)
             | Error::PasswordsDoNotMatch
             | Error::DonationAmountMustBePositive
+            | Error::InvalidGiftAmount
             | Error::InvalidArcadiaSettings(_)
             | Error::BonusPointsSnatchCostOutOfRange(_)
             | Error::InvalidTorrentSearchQuery(_)
