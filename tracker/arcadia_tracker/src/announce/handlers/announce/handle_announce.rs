@@ -213,7 +213,9 @@ async fn handle(
     let user_id = match arc.passkey2id.read().get(&passkey).cloned() {
         Some(user_id) => user_id,
         None => {
-            log::warn!("user not found for passkey {}", passkey);
+            // Never log the passkey itself: it is a long lived credential and it is
+            // read from the URL, so it may also contain log control characters.
+            log::warn!("announce with an unknown passkey");
             return Err(AnnounceError::UserNotFound);
         }
     };
