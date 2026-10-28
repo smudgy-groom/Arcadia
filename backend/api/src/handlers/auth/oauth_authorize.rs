@@ -102,10 +102,17 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
             ),
         ]);
     }
+    // an S256 challenge is exactly one base64url encoded SHA-256 digest, and storing an
+    // arbitrary-length value would let any user grow the Redis instance at will
     let Some(code_challenge) = request
         .code_challenge
         .clone()
-        .filter(|challenge| !challenge.is_empty())
+        .filter(|challenge| {
+            challenge.len() == 43
+                && challenge
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        })
         .filter(|_| request.code_challenge_method.as_deref() == Some("S256"))
     else {
         return redirect(&[
