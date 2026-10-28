@@ -269,9 +269,12 @@ impl ConnectionPool {
         Ok(badges)
     }
 
+    /// The badges earned by a user. A secret badge, and the note written when it was awarded,
+    /// are only returned to the users allowed to see the invisible badges.
     pub async fn find_user_earned_badges(
         &self,
         user_id: i32,
+        viewer_can_see_secret: bool,
     ) -> Result<Vec<UserEarnedBadgeWithDetails>> {
         let rows = sqlx::query_as!(
             UserEarnedBadgeWithDetails,
@@ -288,9 +291,11 @@ impl ConnectionPool {
                 FROM user_earned_badges ueb
                 JOIN user_badges ub ON ub.id = ueb.badge_id
                 WHERE ueb.user_id = $1
+                  AND ($2::BOOLEAN OR NOT ub.is_secret)
                 ORDER BY ueb.awarded_at DESC
             "#,
-            user_id
+            user_id,
+            viewer_can_see_secret
         )
         .fetch_all(&self.pool)
         .await
