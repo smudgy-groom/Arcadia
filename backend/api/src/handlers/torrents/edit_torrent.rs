@@ -57,6 +57,43 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
             .await?;
     }
 
+    // the snatch cost drives the site economy: it is only editable when the instance allows
+    // uploaders to choose it, and always within the configured range.
+    let snatch_cost_changed = torrent.bonus_points_snatch_cost != form.bonus_points_snatch_cost;
+    if snatch_cost_changed {
+        let (allow_uploader_set, cost_min, cost_max) = {
+            let settings = arc.settings.lock().unwrap();
+            (
+                settings.allow_uploader_set_torrent_bonus_points_cost,
+                settings.torrent_bonus_points_cost_min,
+                settings.torrent_bonus_points_cost_max,
+            )
+        };
+
+        let can_edit_any_torrent = arc
+            .pool
+            .user_has_permission(user.sub, &UserPermission::EditTorrent)
+            .await?;
+
+        if !can_edit_any_torrent && !allow_uploader_set {
+            return Err(Error::InsufficientPermissions(
+                "allow_uploader_set_torrent_bonus_points_cost".to_string(),
+            ));
+        }
+
+        if form.bonus_points_snatch_cost < cost_min {
+            return Err(Error::BonusPointsSnatchCostOutOfRange(format!(
+                "bonus_points_snatch_cost must be at least {cost_min}"
+            )));
+        }
+
+        if form.bonus_points_snatch_cost > cost_max {
+            return Err(Error::BonusPointsSnatchCostOutOfRange(format!(
+                "bonus_points_snatch_cost must be at most {cost_max}"
+            )));
+        }
+    }
+
     // a torrent newly marked as trumpable after its upload must be notified to its uploader,
     // editing an already set reason and removing the mark both need no notification.
     let trumpable_notification = if trumpable_changed
