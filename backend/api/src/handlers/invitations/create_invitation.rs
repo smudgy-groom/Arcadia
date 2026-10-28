@@ -27,10 +27,23 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     invitation: Json<SentInvitation>,
     arc: Data<Arcadia<R>>,
     user: Authdata,
+    req: actix_web::HttpRequest,
 ) -> Result<HttpResponse> {
     let current_user = arc.pool.find_user_with_id(user.sub).await?;
     if current_user.invitations == 0 {
         return Err(Error::NoInvitationsAvailable);
+    }
+
+    // accepting an application is a staff decision, so holding an invitation
+    // must not be enough to reach it through this endpoint
+    if invitation.user_application_id.is_some() {
+        arc.pool
+            .require_permission(
+                user.sub,
+                &arcadia_storage::models::user::UserPermission::UpdateUserApplication,
+                req.path(),
+            )
+            .await?;
     }
 
     let invitation_expiration_days = arc.settings.lock().unwrap().invitation_expiration_days;
