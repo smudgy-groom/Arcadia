@@ -3,6 +3,24 @@ import presetHTML5 from '@bbob/preset-html5'
 import DOMPurify from 'dompurify'
 import { isEOL } from '@bbob/plugin-helper'
 
+// `presetHTML5` renders bold/italic/underline/strike/color/size as inline `style` attributes, and
+// DOMPurify does not inspect the content of a `style` attribute, so an attacker could otherwise
+// inject arbitrary CSS (`position: fixed` overlays, `url()` beacons, ...) into any BBCode field
+const ALLOWED_CSS_PROPERTIES = ['color', 'font-weight', 'font-style', 'font-size', 'text-decoration']
+
+DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
+  if (data.attrName !== 'style') return
+
+  data.attrValue = data.attrValue
+    .split(';')
+    .map((declaration) => declaration.trim())
+    .filter((declaration) => {
+      const property = declaration.split(':')[0]?.trim().toLowerCase()
+      return property !== undefined && property !== '' && ALLOWED_CSS_PROPERTIES.includes(property)
+    })
+    .join('; ')
+})
+
 export function parseBBCode(bbcode: string): string {
   if (!bbcode) return ''
 
