@@ -1,5 +1,9 @@
 use serde_json::{json, Value};
 
+/// The longest tag expression accepted, in bytes. Bounds the depth the parser and the DNF
+/// conversion can recurse to, and the amount of tokens they have to walk.
+const MAX_TAG_EXPRESSION_LENGTH: usize = 1024;
+
 fn sanitize_tag_name(name: &str) -> String {
     name.trim().to_lowercase()
 }
@@ -183,9 +187,15 @@ struct DnfClause {
     exclude: Vec<String>,
 }
 
+/// Upper bound on the number of DNF clauses a single expression may expand to. The tag filter is
+/// evaluated by PostgreSQL for every candidate title group, so an unbounded clause count makes the
+/// search query arbitrarily expensive.
+const MAX_DNF_CLAUSES: usize = 256;
+
 /// Convert an AST to DNF (OR of AND clauses).
 /// Each clause contains included tags (positive) and excluded tags (negated).
-fn to_dnf(expression: &Expression) -> Result<Vec<DnfClause>, String> {
+/// `budget` bounds the number of clauses the expression may expand to.
+fn to_dnf(expression: &Expression, budget: usize) -> Result<Vec<DnfClause>, String> {
     match expression {
         Expression::Tag(name) => Ok(vec![DnfClause {
             include: vec![name.clone()],
@@ -200,7 +210,7 @@ fn to_dnf(expression: &Expression) -> Result<Vec<DnfClause>, String> {
                 }]),
                 Expression::Not(double_inner) => {
                     // !!X = X
-                    to_dnf(double_inner)
+                    to_dnf(double_inner, budget)
                 }
                 Expression::And(left, right) => {
                     // !(A & B) = !A | !B
@@ -208,7 +218,7 @@ fn to_dnf(expression: &Expression) -> Result<Vec<DnfClause>, String> {
                         Box::new(Expression::Not(left.clone())),
                         Box::new(Expression::Not(right.clone())),
                     );
-                    to_dnf(&negated)
+                    to_dnf(&negated, budget)
                 }
                 Expression::Or(left, right) => {
                     // !(A | B) = !A & !B
@@ -216,19 +226,25 @@ fn to_dnf(expression: &Expression) -> Result<Vec<DnfClause>, String> {
                         Box::new(Expression::Not(left.clone())),
                         Box::new(Expression::Not(right.clone())),
                     );
-                    to_dnf(&negated)
+                    to_dnf(&negated, budget)
                 }
             }
         }
         Expression::Or(left, right) => {
-            let mut left_clauses = to_dnf(left)?;
-            let right_clauses = to_dnf(right)?;
+            let mut left_clauses = to_dnf(left, budget)?;
+            let right_clauses = to_dnf(right, budget)?;
+            if left_clauses.len() + right_clauses.len() > budget {
+                return Err("tag expression is too complex".to_string());
+            }
             left_clauses.extend(right_clauses);
             Ok(left_clauses)
         }
         Expression::And(left, right) => {
-            let left_clauses = to_dnf(left)?;
-            let right_clauses = to_dnf(right)?;
+            let left_clauses = to_dnf(left, budget)?;
+            let right_clauses = to_dnf(right, budget)?;
+            if left_clauses.len().saturating_mul(right_clauses.len()) > budget {
+                return Err("tag expression is too complex".to_string());
+            }
             // Cartesian product: distribute AND over OR
             let mut result = Vec::new();
             for left_clause in &left_clauses {
@@ -270,6 +286,9 @@ pub fn parse_tag_expression(input: &str) -> Result<Option<Value>, String> {
     if trimmed.is_empty() {
         return Ok(None);
     }
+    if trimmed.len() > MAX_TAG_EXPRESSION_LENGTH {
+        return Err("tag expression is too long".to_string());
+    }
 
     let tokens = tokenize(trimmed)?;
     if tokens.is_empty() {
@@ -283,7 +302,7 @@ pub fn parse_tag_expression(input: &str) -> Result<Option<Value>, String> {
         return Err("unexpected token after expression".to_string());
     }
 
-    let clauses = to_dnf(&ast)?;
+    let clauses = to_dnf(&ast, MAX_DNF_CLAUSES)?;
     Ok(Some(dnf_to_json(clauses)))
 }
 
