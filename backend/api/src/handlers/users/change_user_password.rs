@@ -75,5 +75,11 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         Utc::now() + Duration::seconds(1),
     )?;
 
+    if !tokens.refresh_token.is_empty() {
+        arc.auth
+            .register_refresh_token(&tokens.refresh_token)
+            .await?;
+    }
+
     Ok(HttpResponse::Ok().json(tokens))
 }
