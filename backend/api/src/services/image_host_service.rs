@@ -1,11 +1,13 @@
+use std::net::IpAddr;
 use std::time::Duration;
 
 use arcadia_common::error::{Error, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use reqwest::Client;
 use serde::Deserialize;
+use url::Url;
 
-use crate::config::ImageHostConfig;
+use crate::{config::ImageHostConfig, services::ip_check};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -83,6 +85,31 @@ pub async fn rehost_image_urls(config: &ImageHostConfig, urls: &mut [String]) {
 
     for url in urls.iter_mut() {
         if url.is_empty() {
+            continue;
+        }
+        // The image host fetches this url itself, so handing it an address that belongs to the
+        // deployment's own network turns the rehost into a pivot into it. Only public http(s)
+        // urls are rehosted: literal addresses must be public, and host names must be fully
+        // qualified and outside the local/internal suffixes.
+        let allowed = Url::parse(url)
+            .ok()
+            .filter(|parsed| matches!(parsed.scheme(), "http" | "https"))
+            .and_then(|parsed| parsed.host_str().map(str::to_owned))
+            .is_some_and(|host| match host.parse::<IpAddr>() {
+                Ok(ip) => ip_check::is_public(ip),
+                Err(_) => {
+                    let host = host.to_lowercase();
+                    host.contains('.')
+                        && !(host.ends_with(".localhost")
+                            || host.ends_with(".local")
+                            || host.ends_with(".internal")
+                            || host.ends_with(".cluster.local")
+                            || host.ends_with(".svc")
+                            || host.ends_with(".home.arpa"))
+                }
+            });
+        if !allowed {
+            log::warn!("Not rehosting a url that is not public");
             continue;
         }
         let result = client
