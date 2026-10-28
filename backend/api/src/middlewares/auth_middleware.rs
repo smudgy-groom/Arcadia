@@ -92,6 +92,17 @@ pub async fn validate_token<R: RedisPoolInterface + 'static>(
         return Err(ErrorUnauthorized("token invalidated"));
     }
 
+    // the ban has to be enforced on every request: a token issued before the ban is still
+    // cryptographically valid, and not every path that bans a user invalidates their sessions
+    let is_banned = arc
+        .pool
+        .is_user_banned(user_id)
+        .await
+        .map_err(|e| ErrorUnauthorized(e.to_string()))?;
+    if is_banned {
+        return Err(ErrorUnauthorized("account banned"));
+    }
+
     Ok(user_id)
 }
 
