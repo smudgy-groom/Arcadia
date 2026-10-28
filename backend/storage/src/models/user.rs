@@ -239,11 +239,22 @@ pub struct LoginResponse {
     pub refresh_token: String,
 }
 
+/// What a token may be used for. Both kinds are signed with the same key, so this claim is
+/// what stops a long lived refresh token from being presented as a bearer credential, and an
+/// access token from being exchanged for a refresh token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenType {
+    Access,
+    Refresh,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub sub: i32,
     pub exp: i64,
     pub iat: i64,
+    pub typ: TokenType,
 }
 
 #[derive(Serialize, Deserialize, Debug, ToSchema)]

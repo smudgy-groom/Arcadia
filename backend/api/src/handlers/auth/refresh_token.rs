@@ -2,7 +2,7 @@ use crate::{services::auth::generate_login_tokens, Arcadia};
 use actix_web::{web, HttpResponse};
 use arcadia_common::error::{Error, Result};
 use arcadia_storage::{
-    models::user::{Claims, LoginResponse, RefreshToken},
+    models::user::{Claims, LoginResponse, RefreshToken, TokenType},
     redis::RedisPoolInterface,
 };
 use chrono::prelude::Utc;
@@ -27,6 +27,11 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         &Validation::default(),
     )
     .map_err(|_| Error::InvalidOrExpiredRefreshToken)?;
+
+    // an access token must not be exchangeable for a 90 day credential
+    if old_refresh_token.claims.typ != TokenType::Refresh {
+        return Err(Error::InvalidOrExpiredRefreshToken);
+    }
 
     let is_invalidated = arc
         .auth

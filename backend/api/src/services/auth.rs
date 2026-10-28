@@ -1,6 +1,6 @@
 use arcadia_common::error::{Error, Result};
 use arcadia_storage::{
-    models::user::{Claims, LoginResponse},
+    models::user::{Claims, LoginResponse, TokenType},
     redis::{RedisInterface, RedisPool, RedisPoolInterface},
 };
 use chrono::{DateTime, Duration, Utc};
@@ -32,22 +32,23 @@ pub fn generate_login_tokens(
         *AUTH_TOKEN_SHORT_DURATION
     };
 
-    let encode_token = |expiration_date: DateTime<Utc>| {
+    let encode_token = |expiration_date: DateTime<Utc>, typ: TokenType| {
         encode(
             &Header::default(),
             &Claims {
                 sub: user_id,
                 exp: expiration_date.timestamp(),
                 iat: issued_at.timestamp(),
+                typ,
             },
             &encoding_key,
         )
         .map_err(Error::JwtError)
     };
 
-    let token = encode_token(issued_at + authentication_token_duration)?;
+    let token = encode_token(issued_at + authentication_token_duration, TokenType::Access)?;
     let refresh_token = if remember_me {
-        encode_token(issued_at + *REFRESH_TOKEN_DURATION)?
+        encode_token(issued_at + *REFRESH_TOKEN_DURATION, TokenType::Refresh)?
     } else {
         String::new()
     };
