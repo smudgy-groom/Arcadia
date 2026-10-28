@@ -147,7 +147,16 @@ pub fn parse_file_dict<B>(file_bencode: &B) -> ParseResult<&BDictAccess<B::BKey,
 /// Parses the length from the info or file dictionary.
 pub fn parse_length<B>(info_or_file_dict: &BDictAccess<B::BKey, B>) -> ParseResult<u64>
     where B: BRefAccess {
-    CONVERT.lookup_and_convert_int(info_or_file_dict, LENGTH_KEY).map(|len| len as u64)
+    let length = try!(CONVERT.lookup_and_convert_int(info_or_file_dict, LENGTH_KEY));
+
+    // A file length is unsigned; widening a negative bencode integer would turn
+    // it into a value near u64::MAX and poison every sum built from it.
+    if length < 0 {
+        let details = format!("File Length Of {} Is Invalid", length);
+        return Err(ParseError::from_kind(ParseErrorKind::MissingData { details }));
+    }
+
+    Ok(length as u64)
 }
 
 /// Parses the md5sum from the info or file dictionary.
