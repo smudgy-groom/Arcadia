@@ -36,11 +36,17 @@ pub async fn update_seedtime_and_bonus_points(
                 ta.id AS activity_id,
                 ta.user_id,
                 t.size AS torrent_size,
-                ROUND({formula})::bigint * CASE
-                    WHEN (SELECT reward_bonus_points_per_seeding_client FROM arcadia_settings LIMIT 1)
-                    THEN seeding_clients.active_seeding_clients
-                    ELSE 1
-                END AS bonus
+                -- the formula is operator-configured and the torrent size is uploader-declared,
+                -- so the result is clamped instead of being trusted and cast straight to bigint
+                LEAST(
+                    ROUND({formula})::numeric
+                        * CASE
+                            WHEN (SELECT reward_bonus_points_per_seeding_client FROM arcadia_settings LIMIT 1)
+                            THEN seeding_clients.active_seeding_clients
+                            ELSE 1
+                          END,
+                    1000000000000::numeric
+                )::bigint AS bonus
             FROM torrent_activities ta
             INNER JOIN torrents t ON ta.torrent_id = t.id
             INNER JOIN LATERAL (
@@ -54,23 +60,29 @@ pub async fn update_seedtime_and_bonus_points(
         ),
         update_activities AS (
             UPDATE torrent_activities ta
-            SET bonus_points = ta.bonus_points + ab.bonus
+            SET bonus_points = LEAST(
+                ta.bonus_points::numeric + ab.bonus::numeric,
+                9000000000000000000::numeric
+            )::bigint
             FROM activity_bonus ab
             WHERE ta.id = ab.activity_id AND ab.bonus > 0
         ),
         user_totals AS (
             SELECT
                 user_id,
-                SUM(bonus)::bigint AS total_bonus,
+                LEAST(SUM(bonus), 9000000000000000000::numeric)::bigint AS total_bonus,
                 COUNT(*)::bigint AS seeded_torrents,
-                SUM(torrent_size)::bigint AS total_size
+                SUM(torrent_size) AS total_size
             FROM activity_bonus
             WHERE bonus > 0
             GROUP BY user_id
         ),
         updated_users AS (
             UPDATE users u
-            SET bonus_points = u.bonus_points + ut.total_bonus
+            SET bonus_points = LEAST(
+                u.bonus_points::numeric + ut.total_bonus::numeric,
+                9000000000000000000::numeric
+            )::bigint
             FROM user_totals ut
             WHERE u.id = ut.user_id
         )
