@@ -24,11 +24,11 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     req: HttpRequest,
     application: Json<UserCreatedUserApplication>,
 ) -> Result<HttpResponse> {
-    let client_ip = req
-        .connection_info()
-        .realip_remote_addr()
-        .and_then(|ip| ip.parse::<IpNetwork>().ok())
-        .unwrap();
+    let client_ip = arc
+        .api
+        .client_ip(&req)
+        .map(IpNetwork::from)
+        .expect("a client ip is always available");
 
     let created_application = arc
         .pool
