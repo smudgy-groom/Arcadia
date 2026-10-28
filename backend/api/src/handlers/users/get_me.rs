@@ -5,7 +5,7 @@ use arcadia_storage::{
     models::{
         common::OrderByDirection,
         torrent::{TorrentSearch, TorrentSearchOrderByColumn},
-        user::Profile,
+        user::{Profile, UserPermission},
     },
     redis::RedisPoolInterface,
 };
@@ -66,7 +66,15 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         .search_torrents(&torrent_search, Some(current_user.id), false)
         .await?;
 
-    let earned_badges = arc.pool.find_user_earned_badges(current_user.id).await?;
+    let can_see_secret_badges = arc
+        .pool
+        .user_has_permission(user.sub, &UserPermission::ViewInvisibleUserBadges)
+        .await?;
+
+    let earned_badges = arc
+        .pool
+        .find_user_earned_badges(current_user.id, can_see_secret_badges)
+        .await?;
 
     Ok(HttpResponse::Ok().json(Profile {
         user: current_user,
