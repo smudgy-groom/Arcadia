@@ -166,10 +166,13 @@ impl ConnectionPool {
             Error::WrongUsernameOrPassword
         })?;
 
-        let parsed_hash = PasswordHash::new(&user.password_hash);
+        // a stored hash that is not a valid PHC string (the first account seeded by the initial
+        // migration has the literal password hash "none") must be a login failure, not a panic
+        let parsed_hash = PasswordHash::new(&user.password_hash)
+            .map_err(|_| Error::WrongUsernameOrPassword)?;
 
         Argon2::default()
-            .verify_password(login.password.as_bytes(), &parsed_hash.unwrap())
+            .verify_password(login.password.as_bytes(), &parsed_hash)
             .map_err(|_| Error::WrongUsernameOrPassword)?;
 
         Ok(user)
