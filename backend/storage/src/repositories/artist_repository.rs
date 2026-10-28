@@ -382,27 +382,29 @@ impl ConnectionPool {
         Ok(())
     }
 
-    pub async fn delete_artists_affiliation(&self, affiliation_ids: &Vec<i64>) -> Result<()> {
-        // Get artist_id for affiliations being deleted
+    pub async fn delete_artists_affiliation(
+        &self,
+        affiliation_ids: &Vec<i64>,
+        current_user_id: i32,
+        can_edit_any_title_group: bool,
+    ) -> Result<()> {
+        // Only the affiliations whose title group the caller created are removed, unless the
+        // caller holds the permission that lets them edit any title group. The delete returns the
+        // rows it actually removed so the artist counters stay consistent with the database.
         let affected_affiliations: Vec<(i64,)> = sqlx::query_as(
             r#"
-            SELECT artist_id
-            FROM affiliated_artists
-            WHERE id = ANY($1)
+            DELETE FROM affiliated_artists aa
+            USING title_groups tg
+            WHERE aa.id = ANY($1)
+              AND tg.id = aa.title_group_id
+              AND ($3 OR tg.created_by_id = $2)
+            RETURNING aa.artist_id
             "#,
         )
         .bind(affiliation_ids)
+        .bind(current_user_id)
+        .bind(can_edit_any_title_group)
         .fetch_all(&self.pool)
-        .await?;
-
-        sqlx::query!(
-            r#"
-            DELETE FROM affiliated_artists
-            WHERE id = ANY($1)
-            "#,
-            &affiliation_ids
-        )
-        .execute(&self.pool)
         .await?;
 
         // Update title_groups_amount for each affected artist
