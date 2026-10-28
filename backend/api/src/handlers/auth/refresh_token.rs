@@ -49,12 +49,25 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         return Err(Error::AccountBanned);
     }
 
+    // the presented token is single use: it is redeemed before a new pair is issued, so a
+    // token that has already been exchanged can never be replayed
+    if !arc
+        .auth
+        .consume_refresh_token(&form.refresh_token)
+        .await?
+    {
+        return Err(Error::InvalidOrExpiredRefreshToken);
+    }
+
     let tokens = generate_login_tokens(
         old_refresh_token.claims.sub,
         &arc.api.jwt_secret,
         true,
         Utc::now(),
     )?;
+    arc.auth
+        .register_refresh_token(&tokens.refresh_token)
+        .await?;
 
     Ok(HttpResponse::Ok().json(tokens))
 }

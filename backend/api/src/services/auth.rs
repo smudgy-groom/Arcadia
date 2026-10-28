@@ -3,10 +3,12 @@ use arcadia_storage::{
     models::user::{Claims, LoginResponse, TokenType},
     redis::{RedisInterface, RedisPool, RedisPoolInterface},
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD as BASE64_URL, Engine};
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_string};
+use sha2::{Digest, Sha256};
 use std::sync::{Arc, LazyLock};
 
 pub static REFRESH_TOKEN_DURATION: LazyLock<Duration> = LazyLock::new(|| Duration::days(90));
@@ -116,5 +118,37 @@ impl<R: RedisPoolInterface> Auth<R> {
         }
 
         Ok(true)
+    }
+
+    /// Key under which an issued refresh token is remembered until it is redeemed or expires.
+    /// The token is never stored, only its SHA256.
+    fn refresh_token_key(token: &str) -> String {
+        format!(
+            "refresh_token:{}",
+            BASE64_URL.encode(Sha256::digest(token.as_bytes()))
+        )
+    }
+
+    /// Remembers a freshly issued refresh token so that it can only ever be redeemed once.
+    pub async fn register_refresh_token(&self, token: &str) -> Result<()> {
+        let mut redis = self.redis_pool.connection().await?;
+        redis
+            .set_ex(
+                Self::refresh_token_key(token),
+                "1",
+                (*REFRESH_TOKEN_DURATION).as_seconds_f64() as usize,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Redeems a presented refresh token. Returns `false` when it was already redeemed, which
+    /// is how the reuse of a rotated token is detected.
+    pub async fn consume_refresh_token(&self, token: &str) -> Result<bool> {
+        let mut redis = self.redis_pool.connection().await?;
+        Ok(redis
+            .get_del(Self::refresh_token_key(token))
+            .await?
+            .is_some())
     }
 }
