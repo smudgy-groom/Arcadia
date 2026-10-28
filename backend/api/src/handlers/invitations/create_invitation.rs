@@ -7,7 +7,10 @@ use actix_web::{
 };
 use arcadia_common::error::{Error, Result};
 use arcadia_storage::{
-    models::invitation::{Invitation, SentInvitation},
+    models::{
+        invitation::{Invitation, SentInvitation},
+        user::UserPermission,
+    },
     redis::RedisPoolInterface,
 };
 
@@ -31,6 +34,18 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     let current_user = arc.pool.find_user_with_id(user.sub).await?;
     if current_user.invitations == 0 {
         return Err(Error::NoInvitationsAvailable);
+    }
+
+    // accepting an application is a staff action: it must not be reachable through the
+    // invitation endpoint, which any member holding an invitation can call
+    if invitation.user_application_id.is_some() {
+        arc.pool
+            .require_permission(
+                user.sub,
+                &UserPermission::UpdateUserApplication,
+                "/api/invitations",
+            )
+            .await?;
     }
 
     let invitation_expiration_days = arc.settings.lock().unwrap().invitation_expiration_days;
