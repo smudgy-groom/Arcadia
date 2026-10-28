@@ -57,7 +57,10 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     else {
         return invalid_grant();
     };
-    let code_verifier = token_request.code_verifier.as_deref().unwrap_or_default();
+    // a verifier must be presented: an absent one is not the empty verifier (RFC 7636 4.5)
+    let Some(code_verifier) = token_request.code_verifier.as_deref() else {
+        return invalid_grant();
+    };
     if token_request.redirect_uri.as_ref() != Some(&client.redirect_uri)
         || !pkce_challenge_matches(code_verifier, &authorization_code.code_challenge)
     {
