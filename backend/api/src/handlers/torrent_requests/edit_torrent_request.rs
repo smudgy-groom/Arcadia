@@ -35,12 +35,21 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
 ) -> Result<HttpResponse> {
     let torrent_request = arc.pool.find_torrent_request(form.id).await?;
 
-    if !arc
+    let is_staff = arc
         .pool
         .user_has_permission(user.sub, &UserPermission::EditTorrentRequest)
-        .await?
-        && torrent_request.created_by_id != user.sub
-    {
+        .await?;
+
+    if !is_staff && torrent_request.created_by_id != user.sub {
+        return Err(Error::InsufficientPermissions(format!(
+            "{:?}",
+            UserPermission::EditTorrentRequest
+        )));
+    }
+
+    // Votes are cast on the title group the request currently targets: letting the author
+    // move the request would redirect a bounty they did not fund to another title group.
+    if !is_staff && form.title_group_id != torrent_request.title_group_id {
         return Err(Error::InsufficientPermissions(format!(
             "{:?}",
             UserPermission::EditTorrentRequest
