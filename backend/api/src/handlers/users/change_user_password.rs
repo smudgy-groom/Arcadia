@@ -62,8 +62,10 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
         .update_user_password_hash(target_user_id, &password_hash)
         .await?;
 
-    // every session opened with the old password is closed
+    // every session opened with the old password is closed, and so are the API keys created
+    // before the account was recovered
     arc.auth.invalidate(target_user_id).await?;
+    arc.pool.delete_all_api_keys(target_user_id).await?;
     arc.pool.revoke_password_reset_token(target_user_id).await?;
 
     // the user keeps browsing with tokens issued after the invalidation instead of having to
