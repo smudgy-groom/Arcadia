@@ -1,11 +1,14 @@
 use crate::{middlewares::auth_middleware::Authdata, Arcadia};
 use actix_web::{
     web::{Data, Json},
-    HttpResponse,
+    HttpRequest, HttpResponse,
 };
 use arcadia_common::error::Result;
 use arcadia_storage::{
-    models::series::{Series, UserCreatedSeries},
+    models::{
+        series::{Series, UserCreatedSeries},
+        user::UserPermission,
+    },
     redis::RedisPoolInterface,
 };
 
@@ -25,7 +28,12 @@ pub async fn exec<R: RedisPoolInterface + 'static>(
     serie: Json<UserCreatedSeries>,
     arc: Data<Arcadia<R>>,
     user: Authdata,
+    req: HttpRequest,
 ) -> Result<HttpResponse> {
+    arc.pool
+        .require_permission(user.sub, &UserPermission::UploadTorrent, req.path())
+        .await?;
+
     let series = arc.pool.create_series(&serie, user.sub).await?;
 
     Ok(HttpResponse::Created().json(series))
